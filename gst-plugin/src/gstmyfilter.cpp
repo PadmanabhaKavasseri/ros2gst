@@ -1,19 +1,15 @@
+
 #ifdef HAVE_CONFIG_H
-#  include <config.h>
+#  include "config.h"
 #endif
 
 #include <gst/gst.h>
+#include <iostream>
 #include "gstmyfilter.h"
 
-
-#include <rcl/rcl.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
-#include <std_msgs/msg/string.h>
-#include <rosidl_runtime_c/string_functions.h>
-
-
-// #include "/opt/ros/humble/include/rcl/rcl/rcl.h"
+#include <thread>
+#include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
 
 GST_DEBUG_CATEGORY_STATIC (gst_my_filter_debug);
 #define GST_CAT_DEFAULT gst_my_filter_debug
@@ -50,20 +46,32 @@ static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
 #define gst_my_filter_parent_class parent_class
 G_DEFINE_TYPE (GstMyFilter, gst_my_filter, GST_TYPE_ELEMENT);
 
-GST_ELEMENT_REGISTER_DEFINE (my_filter, "my_filter", GST_RANK_NONE,
-    GST_TYPE_MYFILTER);
+static void gst_my_filter_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec);
+static void gst_my_filter_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec);
 
-static void gst_my_filter_set_property (GObject * object,
-    guint prop_id, const GValue * value, GParamSpec * pspec);
-static void gst_my_filter_get_property (GObject * object,
-    guint prop_id, GValue * value, GParamSpec * pspec);
-
-static gboolean gst_my_filter_sink_event (GstPad * pad,
-    GstObject * parent, GstEvent * event);
-static GstFlowReturn gst_my_filter_chain (GstPad * pad,
-    GstObject * parent, GstBuffer * buf);
+static gboolean gst_my_filter_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
+static GstFlowReturn gst_my_filter_chain (GstPad * pad, GstObject * parent, GstBuffer * buf);
 
 /* GObject vmethod implementations */
+
+
+
+// Define the ROS publisher and node
+std::shared_ptr<rclcpp::Node> node;
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher;
+
+// Function to run in the new thread
+void ros_publish_thread() {
+  rclcpp::Rate rate(1);  // 1 Hz
+  while (rclcpp::ok()) {
+    auto message = std_msgs::msg::String();
+    message.data = "Hello from GStreamer plugin!";
+    publisher->publish(message);
+    rate.sleep();
+  }
+}
 
 /* initialize the myfilter's class */
 static void
@@ -82,10 +90,11 @@ gst_my_filter_class_init (GstMyFilterClass * klass)
       g_param_spec_boolean ("silent", "Silent", "Produce verbose output ?",
           FALSE, G_PARAM_READWRITE));
 
-  gst_element_class_set_details_simple (gstelement_class,
-      "MyFilter",
-      "FIXME:Generic",
-      "FIXME:Generic Template Element", "root <<user@hostname.org>>");
+  gst_element_class_set_details_simple(gstelement_class,
+    "MyFilter",
+    "FIXME:Generic",
+    "FIXME:Generic Template Element",
+    "Ozan Karaali <<user@hostname.org>>");
 
   gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&src_factory));
@@ -95,7 +104,7 @@ gst_my_filter_class_init (GstMyFilterClass * klass)
 
 /* initialize the new element
  * instantiate pads and add them to element
- * set pad callback functions
+ * set pad calback functions
  * initialize instance structure
  */
 static void
@@ -103,9 +112,9 @@ gst_my_filter_init (GstMyFilter * filter)
 {
   filter->sinkpad = gst_pad_new_from_static_template (&sink_factory, "sink");
   gst_pad_set_event_function (filter->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_my_filter_sink_event));
+                              GST_DEBUG_FUNCPTR(gst_my_filter_sink_event));
   gst_pad_set_chain_function (filter->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_my_filter_chain));
+                              GST_DEBUG_FUNCPTR(gst_my_filter_chain));
   GST_PAD_SET_PROXY_CAPS (filter->sinkpad);
   gst_element_add_pad (GST_ELEMENT (filter), filter->sinkpad);
 
@@ -152,8 +161,7 @@ gst_my_filter_get_property (GObject * object, guint prop_id,
 
 /* this function handles sink events */
 static gboolean
-gst_my_filter_sink_event (GstPad * pad, GstObject * parent,
-    GstEvent * event)
+gst_my_filter_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 {
   GstMyFilter *filter;
   gboolean ret;
@@ -166,7 +174,7 @@ gst_my_filter_sink_event (GstPad * pad, GstObject * parent,
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_CAPS:
     {
-      GstCaps *caps;
+      GstCaps * caps;
 
       gst_event_parse_caps (event, &caps);
       /* do something with the caps */
@@ -192,44 +200,14 @@ gst_my_filter_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
 
   filter = GST_MYFILTER (parent);
 
-  if (filter->silent == FALSE) {
-    // g_print ("I'm plugged, therefore I'm in.\n");
+  if (filter->silent == FALSE){
+    g_print ("Loaded!");
+    // Now we can use iostream C++:
+    std::cout<< "Test" <<std::endl;
   }
 
   /* just push out the incoming buffer without touching it */
   return gst_pad_push (filter->srcpad, buf);
-}
-
-//ROS2 thread func
-void ros2_publisher_thread(void *arg) {
-    rcl_ret_t ret;
-    rclc_support_t support;
-    rclc_executor_t executor = rclc_executor_get_zero_initialized_executor();
-    rcl_allocator_t allocator = rcl_get_default_allocator();
-    rcl_node_t node = rcl_get_zero_initialized_node();
-
-    ret = rclc_support_init(&support, 0, NULL, &allocator);
-    // Handle error
-    ret = rclc_node_init_default(&node, "my_node", "", &support);
-    // Handle error
-
-    rcl_publisher_t publisher = rcl_get_zero_initialized_publisher();
-    ret = rclc_publisher_init_default(&publisher, &node, 
-                        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), "topic");
-    // Handle error
-
-    std_msgs__msg__String msg;
-    // msg.data = "Hello, world!";
-    rosidl_runtime_c__String__assign(&msg.data, "Hello, world!");
-
-    while (true) {
-        ret = rcl_publish(&publisher, &msg, NULL);
-        g_print ("I'm plugged, therefore I'm out.\n");
-        // Handle error
-        sleep(1); // Publish every second
-    }
-
-    return NULL;
 }
 
 
@@ -240,38 +218,51 @@ void ros2_publisher_thread(void *arg) {
 static gboolean
 myfilter_init (GstPlugin * myfilter)
 {
-  /* debug category for filtering log messages
+  /* debug category for fltering log messages
    *
    * exchange the string 'Template myfilter' with your description
    */
+  // Initialize ROS
+  rclcpp::init(0, nullptr);
+  node = std::make_shared<rclcpp::Node>("my_filter_node");
+  publisher = node->create_publisher<std_msgs::msg::String>("my_topic", 10);
+
+  // Create and detach the thread
+  std::thread pub_thread(ros_publish_thread);
+  pub_thread.detach();
+
   GST_DEBUG_CATEGORY_INIT (gst_my_filter_debug, "myfilter",
       0, "Template myfilter");
 
-  //ROS Stuff
-  pthread_t t;
-  pthread_create(&t, NULL, &ros2_publisher_thread, NULL);
-
-
-
-  return GST_ELEMENT_REGISTER (my_filter, myfilter);
+  return gst_element_register (myfilter, "myfilter", GST_RANK_NONE,
+      GST_TYPE_MYFILTER);
 }
 
-/* PACKAGE: this is usually set by meson depending on some _INIT macro
- * in meson.build and then written into and defined in config.h, but we can
- * just set it ourselves here in case someone doesn't use meson to
+/* PACKAGE: this is usually set by autotools depending on some _INIT macro
+ * in configure.ac and then written into and defined in config.h, but we can
+ * just set it ourselves here in case someone doesn't use autotools to
  * compile this code. GST_PLUGIN_DEFINE needs PACKAGE to be defined.
  */
 #ifndef PACKAGE
 #define PACKAGE "myfirstmyfilter"
 #endif
 
+
+#ifndef PACKAGE_VERSION
+#define PACKAGE_VERSION "1.19.0.1"
+#endif
 /* gstreamer looks for this structure to register myfilters
  *
  * exchange the string 'Template myfilter' with your myfilter description
  */
-GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
+GST_PLUGIN_DEFINE (
+    GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
     myfilter,
     "my_filter",
     myfilter_init,
-    PACKAGE_VERSION, GST_LICENSE, GST_PACKAGE_NAME, GST_PACKAGE_ORIGIN)
+    PACKAGE_VERSION,
+    "LGPL",
+    "GStreamer",
+    "http://gstreamer.net/"
+)

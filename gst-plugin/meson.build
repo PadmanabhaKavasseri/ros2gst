@@ -15,6 +15,7 @@ gstaudio_dep = dependency('gstreamer-audio-1.0',
 # ROS2 dependencies
 ros2_dep = dependency('rcl', required: true)
 ros2c_dep = dependency('rclc', required: true)
+ros2cpp_dep = dependency('rclcpp', required: true)
 std_msgs_dep = dependency('std_msgs', required: true)
 
 # Plugin 1
@@ -45,13 +46,14 @@ gstaudiofilterexample = library('gstaudiofilterexample',
 
 # The myfilter Plugin
  gstmyfilter_sources = [
-  'src/gstmyfilter.c',
+  'src/gstmyfilter.cpp',
   ]
 
 gstmyfilterexample = library('gstmyfilter',
   gstmyfilter_sources,
   c_args: plugin_c_args,
-  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2c_dep, std_msgs_dep],
+  include_directories: include_directories('.'), 
+  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2cpp_dep, std_msgs_dep],
   install : true,
   install_dir : plugins_install_dir,
 )
