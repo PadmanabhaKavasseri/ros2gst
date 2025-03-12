@@ -61,6 +61,8 @@ static GstFlowReturn gst_my_filter_chain (GstPad * pad, GstObject * parent, GstB
 // Define the ROS publisher and node
 std::shared_ptr<rclcpp::Node> node;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher;
+rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription;
+int cnt = 0;
 
 // Function to run in the new thread
 void ros_publish_thread() {
@@ -71,6 +73,17 @@ void ros_publish_thread() {
     publisher->publish(message);
     rate.sleep();
   }
+}
+
+// Callback function to handle received messages
+void ros_message_callback(const std_msgs::msg::String::SharedPtr msg) {
+  // GST_INFO("Received message: %s", msg->data.c_str());
+  std::cout << "Received message: " << msg->data << " " << cnt++ << std::endl;
+}
+
+// Function to run ROS spin in a separate thread
+void ros_spin_thread() {
+  rclcpp::spin(node);
 }
 
 /* initialize the myfilter's class */
@@ -201,10 +214,11 @@ gst_my_filter_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
   filter = GST_MYFILTER (parent);
 
   if (filter->silent == FALSE){
-    g_print ("Loaded!");
+    // g_print ("Loaded!");
     // Now we can use iostream C++:
-    std::cout<< "Test" <<std::endl;
+    // std::cout << "Test1" << std::endl;
   }
+  std::cout << "Test1" << std::endl;
 
   /* just push out the incoming buffer without touching it */
   return gst_pad_push (filter->srcpad, buf);
@@ -218,18 +232,23 @@ gst_my_filter_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
 static gboolean
 myfilter_init (GstPlugin * myfilter)
 {
-  /* debug category for fltering log messages
-   *
-   * exchange the string 'Template myfilter' with your description
-   */
+  
   // Initialize ROS
   rclcpp::init(0, nullptr);
   node = std::make_shared<rclcpp::Node>("my_filter_node");
-  publisher = node->create_publisher<std_msgs::msg::String>("my_topic", 10);
+  // publisher = node->create_publisher<std_msgs::msg::String>("my_topic", 10);
+  subscription = node->create_subscription<std_msgs::msg::String>(
+    "/my_topic",
+    10,
+    ros_message_callback
+  );
 
   // Create and detach the thread
-  std::thread pub_thread(ros_publish_thread);
-  pub_thread.detach();
+  // std::thread pub_thread(ros_publish_thread);
+  // pub_thread.detach();
+  // Create and detach the thread for ROS spin
+  std::thread spin_thread(ros_spin_thread);
+  spin_thread.detach();
 
   GST_DEBUG_CATEGORY_INIT (gst_my_filter_debug, "myfilter",
       0, "Template myfilter");
