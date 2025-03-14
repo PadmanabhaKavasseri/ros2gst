@@ -3,10 +3,7 @@
 #  include "config.h"
 #endif
 
-
 #include "mysrc.hpp"
-
-
 
 GST_DEBUG_CATEGORY_STATIC (gst_my_src_debug);
 #define GST_CAT_DEFAULT gst_my_src_debug
@@ -24,24 +21,15 @@ enum
   PROP_SILENT
 };
 
-/* the capabilities of the inputs and outputs.
- *
- * describe the real formats here.
- */
-// static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink",
-//     GST_PAD_SINK,
-//     GST_PAD_ALWAYS,
-//     GST_STATIC_CAPS ("ANY")
-//     );
-
-static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
+static GstStaticPadTemplate src_factory = 
+GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("ANY")
     );
 
 #define gst_my_src_parent_class parent_class
-G_DEFINE_TYPE (GstMySrc, gst_my_src, GST_TYPE_ELEMENT);
+G_DEFINE_TYPE (GstMySrc, gst_my_src, GST_TYPE_PUSH_SRC);
 
 static void gst_my_src_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -50,9 +38,6 @@ static void gst_my_src_get_property (GObject * object, guint prop_id,
 
 static gboolean gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
 static GstFlowReturn gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf);
-
-/* GObject vmethod implementations */
-
 
 
 // Define the ROS publisher and node
@@ -83,6 +68,24 @@ void ros_spin_thread() {
   rclcpp::spin(node);
 }
 
+static gboolean
+gst_my_src_start (GstBaseSrc * src)
+{
+  //I think
+  //This function should initialize all ROS related subscribers and start the threads to receive data from them 
+  return TRUE;
+}
+
+static GstFlowReturn
+gst_my_src_fill (GstPushSrc * src, GstBuffer * buf)
+{
+  //I think
+  //This function should be called by the ros subscriber cb right?
+  //because it is a pushsrc.. so whenever some ROS gets a camera frame, it pushes the frame into the pipeline. 
+  //this function should somehow receive a ROS message. Not sure how to do that. 
+  return GST_FLOW_OK;
+}
+
 /* initialize the myfilter's class */
 static void
 gst_my_src_class_init (GstMySrcClass * klass)
@@ -91,32 +94,33 @@ gst_my_src_class_init (GstMySrcClass * klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstPushSrcClass *push_src_class = GST_PUSH_SRC_CLASS (klass);
   GstBaseSrcClass *base_src_class = GST_BASE_SRC_CLASS (klass);
+  GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
 
+  gst_element_class_add_pad_template (gstelement_class,
+      gst_static_pad_template_get (&src_factory));
 
-
-  
-  GstElementClass *gstelement_class;
-
-  // gobject_class = (GObjectClass *) klass;
-  gstelement_class = (GstElementClass *) klass;
 
   gobject_class->set_property = gst_my_src_set_property;
   gobject_class->get_property = gst_my_src_get_property;
+
+  base_src_class->start = GST_DEBUG_FUNCPTR(gst_my_src_start);
+  push_src_class->fill = GST_DEBUG_FUNCPTR(gst_my_src_fill);
+  //todo add dispose
+
+
+
 
   g_object_class_install_property (gobject_class, PROP_SILENT,
       g_param_spec_boolean ("silent", "Silent", "Produce verbose output ?",
           FALSE, G_PARAM_READWRITE));
 
   gst_element_class_set_details_simple(gstelement_class,
-    "MySrc",
-    "FIXME:Generic",
-    "FIXME:Generic Template Element",
-    "Ozan Karaali <<user@hostname.org>>");
+    "ROS-SRC",
+    "ROS2 Source",
+    "Subscribes to ROS2 sensor messages, converts data to gst buffers, and pushes them into pipeline",
+    "Padmanabha Kavasseri <<pkavasseri@gmail.com>>");
 
-  gst_element_class_add_pad_template (gstelement_class,
-      gst_static_pad_template_get (&src_factory));
-  // gst_element_class_add_pad_template (gstelement_class,
-  //     gst_static_pad_template_get (&sink_factory));
+
 }
 
 /* initialize the new element
@@ -127,14 +131,6 @@ gst_my_src_class_init (GstMySrcClass * klass)
 static void
 gst_my_src_init (GstMySrc * mysrc)
 {
-  // mysrc->sinkpad = gst_pad_new_from_static_template (&sink_factory, "sink");
-  // gst_pad_set_event_function (src->sinkpad,
-  //                             GST_DEBUG_FUNCPTR(gst_my_src_sink_event));
-  // gst_pad_set_chain_function (src->sinkpad,
-  //                             GST_DEBUG_FUNCPTR(gst_my_src_chain));
-  // GST_PAD_SET_PROXY_CAPS (src->sinkpad);
-  // gst_element_add_pad (GST_ELEMENT (src), src->sinkpad);
-
   mysrc->srcpad = gst_pad_new_from_static_template (&src_factory, "src");
   GST_PAD_SET_PROXY_CAPS (mysrc->srcpad);
   gst_element_add_pad (GST_ELEMENT (mysrc), mysrc->srcpad);

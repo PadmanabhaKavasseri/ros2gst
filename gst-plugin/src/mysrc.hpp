@@ -17,15 +17,21 @@ G_BEGIN_DECLS
 
 #define GST_TYPE_MYSRC (gst_my_src_get_type())
 G_DECLARE_FINAL_TYPE (GstMySrc, gst_my_src,
-    GST, MYSRC, GstElement)
+    GST, MYSRC, GstPushSrc)
 
 struct _GstMySrc
 {
-  GstElement element;
+  GstPushSrc parent;
 
-  GstPad *sinkpad, *srcpad;
+  GstPad *srcpad;
 
   gboolean silent;
+};
+
+// Class structure declaration
+struct _GstMySrcClass
+{
+  GstPushSrcClass parent_class; // Parent class is GstPushSrcClass
 };
 
 G_END_DECLS
