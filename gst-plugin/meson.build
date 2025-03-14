@@ -57,3 +57,20 @@ gstmyfilterexample = library('gstmyfilter',
   install : true,
   install_dir : plugins_install_dir,
 )
+
+gst_include = include_directories(gst_dep.get_pkgconfig_variable('includedir'))
+gstbase_include = include_directories(gstbase_dep.get_pkgconfig_variable('includedir'))
+
+# The mysrc Plugin
+ gstmysrc_sources = [
+  'src/gstmysrc.cpp',
+  ]
+
+gstmyfilterexample = library('gstmysrc',
+  gstmysrc_sources,
+  c_args: plugin_c_args,
+  include_directories: [include_directories('.'), gst_include, gstbase_include],
+  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2cpp_dep, std_msgs_dep],
+  install : true,
+  install_dir : plugins_install_dir,
+)

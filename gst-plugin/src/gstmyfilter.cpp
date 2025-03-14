@@ -218,7 +218,6 @@ gst_my_filter_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
     // Now we can use iostream C++:
     // std::cout << "Test1" << std::endl;
   }
-  std::cout << "Test1" << std::endl;
 
   /* just push out the incoming buffer without touching it */
   return gst_pad_push (filter->srcpad, buf);
