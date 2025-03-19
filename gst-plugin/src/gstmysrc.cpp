@@ -43,7 +43,9 @@ static GstFlowReturn gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuff
 // Define the ROS publisher and node
 std::shared_ptr<rclcpp::Node> node;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher;
-rclcpp::Subscription<std_msgs::msg::String>::SharedPtr subscription;
+rclcpp::Subscription<std_msgs::msg::String>::SharedPtr string_sub;
+rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub;
+
 int cnt = 0;
 
 // Function to run in the new thread
@@ -58,9 +60,10 @@ void ros_publish_thread() {
 }
 
 // Callback function to handle received messages
-void ros_message_callback(const std_msgs::msg::String::SharedPtr msg) {
+void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
   // GST_INFO("Received message: %s", msg->data.c_str());
-  std::cout << "Received message: " << msg->data << " " << cnt++ << std::endl;
+  std::cout << "Received message: " << " " << cnt++ << std::endl;
+  //push this into queue
 }
 
 // Function to run ROS spin in a separate thread
@@ -73,6 +76,27 @@ gst_my_src_start (GstBaseSrc * src)
 {
   //I think
   //This function should initialize all ROS related subscribers and start the threads to receive data from them 
+
+  // Initialize ROS
+  std::cout << "/arm_camera/color/image_raw" << std::endl;
+  rclcpp::init(0, nullptr);
+  auto qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
+  std::string topic = "/arm_camera/color/image_raw";
+  node = std::make_shared<rclcpp::Node>("my_src_node");
+  // publisher = node->create_publisher<std_msgs::msg::String>("my_topic", 10);
+  image_sub = node->create_subscription<sensor_msgs::msg::Image>(
+    topic,
+    qos,
+    ros_message_callback
+  );
+
+  // Create and detach the thread
+  // std::thread pub_thread(ros_publish_thread);
+  // pub_thread.detach();
+  // Create and detach the thread for ROS spin
+  std::thread spin_thread(ros_spin_thread);
+  spin_thread.detach();
+
   return TRUE;
 }
 
@@ -103,7 +127,7 @@ gst_my_src_class_init (GstMySrcClass * klass)
   gobject_class->set_property = gst_my_src_set_property;
   gobject_class->get_property = gst_my_src_get_property;
 
-  base_src_class->start = GST_DEBUG_FUNCPTR(gst_my_src_start);
+  base_src_class->start = GST_DEBUG_FUNCPTR(gst_my_src_start); // called from ready to paused 
   push_src_class->fill = GST_DEBUG_FUNCPTR(gst_my_src_fill);
   //todo add dispose
 
@@ -232,23 +256,6 @@ static gboolean
 mysrc_init (GstPlugin * mysrc)
 {
   
-  // Initialize ROS
-  rclcpp::init(0, nullptr);
-  node = std::make_shared<rclcpp::Node>("my_src_node");
-  // publisher = node->create_publisher<std_msgs::msg::String>("my_topic", 10);
-  subscription = node->create_subscription<std_msgs::msg::String>(
-    "/my_topic",
-    10,
-    ros_message_callback
-  );
-
-  // Create and detach the thread
-  // std::thread pub_thread(ros_publish_thread);
-  // pub_thread.detach();
-  // Create and detach the thread for ROS spin
-  std::thread spin_thread(ros_spin_thread);
-  spin_thread.detach();
-
   GST_DEBUG_CATEGORY_INIT (gst_my_src_debug, "mysrc",
       0, "Template mysrc");
 

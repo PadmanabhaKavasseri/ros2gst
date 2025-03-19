@@ -17,6 +17,7 @@ ros2_dep = dependency('rcl', required: true)
 ros2c_dep = dependency('rclc', required: true)
 ros2cpp_dep = dependency('rclcpp', required: true)
 std_msgs_dep = dependency('std_msgs', required: true)
+sensor_msgs_dep = dependency('sensor_msgs', required: true)
 
 # Plugin 1
 plugin_sources = [
@@ -58,6 +59,7 @@ gstmyfilterexample = library('gstmyfilter',
   install_dir : plugins_install_dir,
 )
 
+
 gst_include = include_directories(gst_dep.get_pkgconfig_variable('includedir'))
 gstbase_include = include_directories(gstbase_dep.get_pkgconfig_variable('includedir'))
 
@@ -70,7 +72,7 @@ gstmyfilterexample = library('gstmysrc',
   gstmysrc_sources,
   c_args: plugin_c_args,
   include_directories: [include_directories('.'), gst_include, gstbase_include],
-  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2cpp_dep, std_msgs_dep],
+  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2cpp_dep, std_msgs_dep, sensor_msgs_dep],
   install : true,
   install_dir : plugins_install_dir,
 )
