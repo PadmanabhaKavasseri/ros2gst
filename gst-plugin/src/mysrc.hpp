@@ -38,6 +38,6 @@ G_END_DECLS
 
 #endif /* __GST_MYFILTER_H__ */
 
-//  export GST_PLUGIN_PATH=/data/gst/gst-template/bld/gst-plugin
+//  export GST_PLUGIN_PATH=/data/gst/gst-template/bld/gst-plugin/
 
 //ros2 topic pub /my_topic std_msgs/msg/String '{data: "Hello, ROS2!"}' -r 1

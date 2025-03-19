@@ -284,3 +284,4 @@ GST_PLUGIN_DEFINE (
     "GStreamer",
     "http://gstreamer.net/"
 )
+
