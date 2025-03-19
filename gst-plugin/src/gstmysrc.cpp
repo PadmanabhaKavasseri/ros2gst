@@ -45,6 +45,7 @@ std::shared_ptr<rclcpp::Node> node;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher;
 rclcpp::Subscription<std_msgs::msg::String>::SharedPtr string_sub;
 rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub;
+GstDataQueue *data_queue;
 
 int cnt = 0;
 
@@ -61,9 +62,51 @@ void ros_publish_thread() {
 
 // Callback function to handle received messages
 void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
-  // GST_INFO("Received message: %s", msg->data.c_str());
-  std::cout << "Received message: " << " " << cnt++ << std::endl;
-  //push this into queue
+    std::cout << "Received message: " << cnt++ << std::endl;
+
+    const uint8_t *image_data = msg->data.data();
+    size_t image_size = msg->data.size();
+
+    GstBuffer *buffer = gst_buffer_new_allocate(NULL, image_size, NULL);
+    if (!buffer) {
+        std::cerr << "Failed to allocate GstBuffer" << std::endl;
+        return;
+    }
+
+    GstMapInfo map;
+    if (gst_buffer_map(buffer, &map, GST_MAP_WRITE)) {
+        memcpy(map.data, image_data, image_size);
+        gst_buffer_unmap(buffer, &map);
+    } else {
+        std::cerr << "Failed to map GstBuffer" << std::endl;
+        gst_buffer_unref(buffer);
+        return;
+    }
+
+    GST_BUFFER_PTS(buffer) = msg->header.stamp.sec * GST_SECOND + msg->header.stamp.nanosec;
+    GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
+
+    GstDataQueueItem *item = g_slice_new(GstDataQueueItem);
+    if (!item) {
+        std::cerr << "Failed to create GstDataQueueItem" << std::endl;
+        gst_buffer_unref(buffer);
+        return;
+    }
+
+    item->object = GST_MINI_OBJECT(buffer);
+    item->destroy = (GDestroyNotify)gst_buffer_unref;
+    item->size = gst_buffer_get_size(buffer);
+    item->duration = GST_CLOCK_TIME_NONE;
+    item->visible = TRUE;
+
+    if (!data_queue) {
+        std::cerr << "Data queue not initialized" << std::endl;
+        g_slice_free(GstDataQueueItem, item);
+        return;
+    }
+
+    gst_data_queue_push(data_queue, item);
+  // Clean up or handle other logic as needed
 }
 
 // Function to run ROS spin in a separate thread
@@ -100,14 +143,46 @@ gst_my_src_start (GstBaseSrc * src)
   return TRUE;
 }
 
-static GstFlowReturn
-gst_my_src_fill (GstPushSrc * src, GstBuffer * buf)
-{
-  //I think
-  //This function should be called by the ros subscriber cb right?
-  //because it is a pushsrc.. so whenever some ROS gets a camera frame, it pushes the frame into the pipeline. 
-  //this function should somehow receive a ROS message. Not sure how to do that. 
-  return GST_FLOW_OK;
+static GstFlowReturn gst_my_src_fill(GstPushSrc *src, GstBuffer *buf) {
+    GstDataQueueItem *item;
+    gboolean success = gst_data_queue_pop(data_queue, &item);
+
+    if (!success) {
+        std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
+        return GST_FLOW_EOS;
+    }
+
+    GstBuffer *queued_buffer = GST_BUFFER_CAST(item->object);
+    if (!queued_buffer) {
+        std::cerr << "Failed to cast queue item to GstBuffer" << std::endl;
+        g_slice_free(GstDataQueueItem, item);
+        return GST_FLOW_ERROR;
+    }
+
+    GstMapInfo queued_map, fill_map;
+    if (gst_buffer_map(queued_buffer, &queued_map, GST_MAP_READ) &&
+        gst_buffer_map(buf, &fill_map, GST_MAP_WRITE)) {
+        if (queued_map.size <= fill_map.size) {
+            memcpy(fill_map.data, queued_map.data, queued_map.size);
+        } else {
+            std::cerr << "Buffer size mismatch, cannot copy data" << std::endl;
+            gst_buffer_unmap(queued_buffer, &queued_map);
+            gst_buffer_unmap(buf, &fill_map);
+            gst_buffer_unref(queued_buffer);
+            g_slice_free(GstDataQueueItem, item);
+            return GST_FLOW_ERROR;
+        }
+        gst_buffer_unmap(queued_buffer, &queued_map);
+        gst_buffer_unmap(buf, &fill_map);
+    }
+
+    GST_BUFFER_PTS(buf) = GST_BUFFER_PTS(queued_buffer);
+    GST_BUFFER_DTS(buf) = GST_BUFFER_DTS(queued_buffer);
+
+    gst_buffer_unref(queued_buffer);
+    g_slice_free(GstDataQueueItem, item);
+
+    return GST_FLOW_OK;
 }
 
 /* initialize the myfilter's class */
