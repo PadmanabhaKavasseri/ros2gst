@@ -36,8 +36,8 @@ static void gst_my_src_set_property (GObject * object, guint prop_id,
 static void gst_my_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
-static gboolean gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
-static GstFlowReturn gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf);
+// static gboolean gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
+// static GstFlowReturn gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf);
 
 
 // Define the ROS publisher and node
@@ -48,6 +48,21 @@ rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub;
 GstDataQueue *data_queue;
 
 int cnt = 0;
+
+// Function to check if the queue is full
+gboolean custom_check_full(GstDataQueue *queue, guint visible, guint bytes, guint64 time, gpointer checkdata) {
+    return visible > 100; // Example condition: Full if visible items > 100
+}
+
+// Function to handle when the queue is full
+void custom_full_callback(GstDataQueue *queue, gpointer user_data) {
+    g_print("Queue is full! Handle logic here.\n");
+}
+
+// Function to handle when the queue is empty
+void custom_empty_callback(GstDataQueue *queue, gpointer user_data) {
+    g_print("Queue is empty! Handle logic here.\n");
+}
 
 // Function to run in the new thread
 void ros_publish_thread() {
@@ -66,6 +81,7 @@ void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
 
     const uint8_t *image_data = msg->data.data();
     size_t image_size = msg->data.size();
+    std::cout << "image_size: " << image_size << std::endl;
 
     GstBuffer *buffer = gst_buffer_new_allocate(NULL, image_size, NULL);
     if (!buffer) {
@@ -73,40 +89,34 @@ void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
         return;
     }
 
-    GstMapInfo map;
-    if (gst_buffer_map(buffer, &map, GST_MAP_WRITE)) {
-        memcpy(map.data, image_data, image_size);
-        gst_buffer_unmap(buffer, &map);
+    // Copy image data into the GstBuffer
+    GstMapInfo map_info;
+    if (gst_buffer_map(buffer, &map_info, GST_MAP_WRITE)) {
+        memcpy(map_info.data, image_data, image_size);
+        gst_buffer_unmap(buffer, &map_info);
     } else {
-        std::cerr << "Failed to map GstBuffer" << std::endl;
+        std::cerr << "Failed to map GstBuffer for writing" << std::endl;
         gst_buffer_unref(buffer);
         return;
     }
 
-    GST_BUFFER_PTS(buffer) = msg->header.stamp.sec * GST_SECOND + msg->header.stamp.nanosec;
-    GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
-
-    GstDataQueueItem *item = g_slice_new(GstDataQueueItem);
-    if (!item) {
-        std::cerr << "Failed to create GstDataQueueItem" << std::endl;
-        gst_buffer_unref(buffer);
-        return;
-    }
-
+    // Create a GstDataQueueItem
+    GstDataQueueItem *item = g_slice_new0(GstDataQueueItem);
     item->object = GST_MINI_OBJECT(buffer);
-    item->destroy = (GDestroyNotify)gst_buffer_unref;
     item->size = gst_buffer_get_size(buffer);
-    item->duration = GST_CLOCK_TIME_NONE;
     item->visible = TRUE;
+    item->duration = GST_CLOCK_TIME_NONE;
 
-    if (!data_queue) {
-        std::cerr << "Data queue not initialized" << std::endl;
+    // Push the item onto the queue
+    if (!gst_data_queue_push(data_queue, item)) {
+        std::cerr << "Failed to push item into the queue!" << std::endl;
+        gst_buffer_unref(buffer);
         g_slice_free(GstDataQueueItem, item);
         return;
     }
 
-    gst_data_queue_push(data_queue, item);
-  // Clean up or handle other logic as needed
+    std::cout << "Item successfully pushed into the queue!" << std::endl;
+
 }
 
 // Function to run ROS spin in a separate thread
@@ -146,41 +156,56 @@ gst_my_src_start (GstBaseSrc * src)
 static GstFlowReturn gst_my_src_fill(GstPushSrc *src, GstBuffer *buf) {
     GstDataQueueItem *item;
     gboolean success = gst_data_queue_pop(data_queue, &item);
+    std::cout << "here" << std::endl;
 
     if (!success) {
         std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
         return GST_FLOW_EOS;
     }
-
-    GstBuffer *queued_buffer = GST_BUFFER_CAST(item->object);
-    if (!queued_buffer) {
-        std::cerr << "Failed to cast queue item to GstBuffer" << std::endl;
-        g_slice_free(GstDataQueueItem, item);
-        return GST_FLOW_ERROR;
+    else {
+      std::cout << "NOT EMPTY" << std::endl;
     }
 
-    GstMapInfo queued_map, fill_map;
-    if (gst_buffer_map(queued_buffer, &queued_map, GST_MAP_READ) &&
-        gst_buffer_map(buf, &fill_map, GST_MAP_WRITE)) {
-        if (queued_map.size <= fill_map.size) {
-            memcpy(fill_map.data, queued_map.data, queued_map.size);
-        } else {
-            std::cerr << "Buffer size mismatch, cannot copy data" << std::endl;
-            gst_buffer_unmap(queued_buffer, &queued_map);
-            gst_buffer_unmap(buf, &fill_map);
-            gst_buffer_unref(queued_buffer);
-            g_slice_free(GstDataQueueItem, item);
-            return GST_FLOW_ERROR;
-        }
-        gst_buffer_unmap(queued_buffer, &queued_map);
-        gst_buffer_unmap(buf, &fill_map);
-    }
+    buf = gst_buffer_ref (GST_BUFFER (item->object));
+    item->destroy (item);
 
-    GST_BUFFER_PTS(buf) = GST_BUFFER_PTS(queued_buffer);
-    GST_BUFFER_DTS(buf) = GST_BUFFER_DTS(queued_buffer);
 
-    gst_buffer_unref(queued_buffer);
-    g_slice_free(GstDataQueueItem, item);
+
+    // GstBuffer *queued_buffer = GST_BUFFER_CAST(item->object);
+    // if (!queued_buffer) {
+    //     std::cerr << "Failed to cast queue item to GstBuffer" << std::endl;
+    //     g_slice_free(GstDataQueueItem, item);
+    //     return GST_FLOW_ERROR;
+    // }
+
+    // GstMapInfo queued_map, fill_map;
+    
+    // gst_buffer_map(queued_buffer, &queued_map, GST_MAP_READ);
+    // gst_buffer_set_size(buf, queued_map.size);
+    // std::cout << "New buf size: " << gst_buffer_get_size(buf) << std::endl; 
+    // gst_buffer_map(buf, &fill_map, GST_MAP_WRITE);
+
+    // std::cout << "queued_map.size: " << queued_map.size << ", fill_map.size: " << fill_map.size << std::endl;
+
+    // if (queued_map.size <= fill_map.size) {
+    //     memcpy(fill_map.data, queued_map.data, queued_map.size);
+    // } else {
+    //     std::cerr << "Buffer size mismatch, cannot copy data" << std::endl;
+    //     gst_buffer_unmap(queued_buffer, &queued_map);
+    //     gst_buffer_unmap(buf, &fill_map);
+    //     gst_buffer_unref(queued_buffer);
+    //     g_slice_free(GstDataQueueItem, item);
+    //     return GST_FLOW_ERROR;
+    // }
+    // gst_buffer_unmap(queued_buffer, &queued_map);
+    // gst_buffer_unmap(buf, &fill_map);
+
+
+    // GST_BUFFER_PTS(buf) = GST_BUFFER_PTS(queued_buffer);
+    // GST_BUFFER_DTS(buf) = GST_BUFFER_DTS(queued_buffer);
+
+    // gst_buffer_unref(queued_buffer);
+    // g_slice_free(GstDataQueueItem, item);
 
     return GST_FLOW_OK;
 }
@@ -235,6 +260,15 @@ gst_my_src_init (GstMySrc * mysrc)
   gst_element_add_pad (GST_ELEMENT (mysrc), mysrc->srcpad);
 
   mysrc->silent = FALSE;
+
+  std::cout << "helloooo any body" << std::endl;
+  data_queue = gst_data_queue_new(custom_check_full, custom_full_callback, custom_empty_callback, mysrc);
+  std::cout << "here1111" << std::endl;
+  if (!data_queue) {
+      std::cerr << "Failed to initialize global data queue" << std::endl;
+  }
+
+  // data_queue = gst_data_queue_new(NULL);
 }
 
 static void
@@ -271,56 +305,56 @@ gst_my_src_get_property (GObject * object, guint prop_id,
 
 /* GstElement vmethod implementations */
 
-/* this function handles sink events */
-static gboolean
-gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
-{
-  GstMySrc *src;
-  gboolean ret;
+// /* this function handles sink events */
+// static gboolean
+// gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
+// {
+//   GstMySrc *src;
+//   gboolean ret;
 
-  src = GST_MYSRC (parent);
+//   src = GST_MYSRC (parent);
 
-  GST_LOG_OBJECT (src, "Received %s event: %" GST_PTR_FORMAT,
-      GST_EVENT_TYPE_NAME (event), event);
+//   GST_LOG_OBJECT (src, "Received %s event: %" GST_PTR_FORMAT,
+//       GST_EVENT_TYPE_NAME (event), event);
 
-  switch (GST_EVENT_TYPE (event)) {
-    case GST_EVENT_CAPS:
-    {
-      GstCaps * caps;
+//   switch (GST_EVENT_TYPE (event)) {
+//     case GST_EVENT_CAPS:
+//     {
+//       GstCaps * caps;
 
-      gst_event_parse_caps (event, &caps);
-      /* do something with the caps */
+//       gst_event_parse_caps (event, &caps);
+//       /* do something with the caps */
 
-      /* and forward */
-      ret = gst_pad_event_default (pad, parent, event);
-      break;
-    }
-    default:
-      ret = gst_pad_event_default (pad, parent, event);
-      break;
-  }
-  return ret;
-}
+//       /* and forward */
+//       ret = gst_pad_event_default (pad, parent, event);
+//       break;
+//     }
+//     default:
+//       ret = gst_pad_event_default (pad, parent, event);
+//       break;
+//   }
+//   return ret;
+// }
 
 /* chain function
  * this function does the actual processing
  */
-static GstFlowReturn
-gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
-{
-  GstMySrc *src;
+// static GstFlowReturn
+// gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+// {
+//   GstMySrc *src;
 
-  src = GST_MYSRC (parent);
+//   src = GST_MYSRC (parent);
 
-  if (src->silent == FALSE){
-    // g_print ("Loaded!");
-    // Now we can use iostream C++:
-    // std::cout << "Test1" << std::endl;
-  }
+//   if (src->silent == FALSE){
+//     // g_print ("Loaded!");
+//     // Now we can use iostream C++:
+//     // std::cout << "Test1" << std::endl;
+//   }
 
-  /* just push out the incoming buffer without touching it */
-  return gst_pad_push (src->srcpad, buf);
-}
+//   /* just push out the incoming buffer without touching it */
+//   return gst_pad_push (src->srcpad, buf);
+// }
 
 
 /* entry point to initialize the plug-in
@@ -336,6 +370,8 @@ mysrc_init (GstPlugin * mysrc)
 
   return gst_element_register (mysrc, "mysrc", GST_RANK_NONE,
       GST_TYPE_MYSRC);
+
+  
 }
 
 /* PACKAGE: this is usually set by autotools depending on some _INIT macro

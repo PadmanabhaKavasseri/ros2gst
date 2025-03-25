@@ -33,6 +33,8 @@ struct _GstMySrc
   GstPad *srcpad;
 
   gboolean silent;
+
+  // GstDataQueue *data_queue;
 };
 
 // Class structure declaration
@@ -47,4 +49,4 @@ G_END_DECLS
 
 //  export GST_PLUGIN_PATH=/data/gst/gst-template/bld/gst-plugin/
 
-//ros2 topic pub /my_topic std_msgs/msg/String '{data: "Hello, ROS2!"}' -r 1
+//ros2 topic pub /my_topic std_msgs/msg/String '{data: "Hello, ROS2!"}' -r 1 
