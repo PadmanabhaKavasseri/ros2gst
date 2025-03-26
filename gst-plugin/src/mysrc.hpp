@@ -14,10 +14,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <sensor_msgs/msg/image.hpp>
-
-// #include <gst/dataqueue/gstdataqueue.h>
-
-
+#include <mutex>
 
 
 G_BEGIN_DECLS
@@ -25,7 +22,7 @@ G_BEGIN_DECLS
 #define GST_TYPE_MYSRC (gst_my_src_get_type())
 G_DECLARE_FINAL_TYPE (GstMySrc, gst_my_src,
     GST, MYSRC, GstPushSrc)
-
+  
 struct _GstMySrc
 {
   GstPushSrc parent;
@@ -49,4 +46,4 @@ G_END_DECLS
 
 //  export GST_PLUGIN_PATH=/data/gst/gst-template/bld/gst-plugin/
 
-//ros2 topic pub /my_topic std_msgs/msg/String '{data: "Hello, ROS2!"}' -r 1 
+//ros2 topic pub /my_topic std_msgs/msg/String '{data: "Hello, ROS2!"}' -r 1       

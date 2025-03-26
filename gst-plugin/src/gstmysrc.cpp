@@ -25,8 +25,14 @@ static GstStaticPadTemplate src_factory =
 GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("ANY")
-    );
+    GST_STATIC_CAPS (
+        "video/x-raw, "
+        "format=(string)RGB, "
+        "width=(int)1200, "
+        "height=(int)800, "
+        "framerate=(fraction)30/1"
+    )
+);
 
 #define gst_my_src_parent_class parent_class
 G_DEFINE_TYPE (GstMySrc, gst_my_src, GST_TYPE_PUSH_SRC);
@@ -36,16 +42,13 @@ static void gst_my_src_set_property (GObject * object, guint prop_id,
 static void gst_my_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
-// static gboolean gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
-// static GstFlowReturn gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf);
-
-
 // Define the ROS publisher and node
 std::shared_ptr<rclcpp::Node> node;
 rclcpp::Publisher<std_msgs::msg::String>::SharedPtr publisher;
 rclcpp::Subscription<std_msgs::msg::String>::SharedPtr string_sub;
 rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub;
 GstDataQueue *data_queue;
+std::mutex data_queue_mutex;
 
 int cnt = 0;
 
@@ -54,12 +57,10 @@ gboolean custom_check_full(GstDataQueue *queue, guint visible, guint bytes, guin
     return visible > 100; // Example condition: Full if visible items > 100
 }
 
-// Function to handle when the queue is full
 void custom_full_callback(GstDataQueue *queue, gpointer user_data) {
     g_print("Queue is full! Handle logic here.\n");
 }
 
-// Function to handle when the queue is empty
 void custom_empty_callback(GstDataQueue *queue, gpointer user_data) {
     g_print("Queue is empty! Handle logic here.\n");
 }
@@ -100,7 +101,7 @@ void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
         return;
     }
 
-    // Create a GstDataQueueItem
+    // Create a GstDataQueueItem  
     GstDataQueueItem *item = g_slice_new0(GstDataQueueItem);
     item->object = GST_MINI_OBJECT(buffer);
     item->size = gst_buffer_get_size(buffer);
@@ -108,12 +109,14 @@ void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     item->duration = GST_CLOCK_TIME_NONE;
 
     // Push the item onto the queue
+      // std::lock_guard<std::mutex> lock(data_queue_mutex);
     if (!gst_data_queue_push(data_queue, item)) {
         std::cerr << "Failed to push item into the queue!" << std::endl;
         gst_buffer_unref(buffer);
         g_slice_free(GstDataQueueItem, item);
         return;
     }
+
 
     std::cout << "Item successfully pushed into the queue!" << std::endl;
 
@@ -154,61 +157,53 @@ gst_my_src_start (GstBaseSrc * src)
 }
 
 static GstFlowReturn gst_my_src_fill(GstPushSrc *src, GstBuffer *buf) {
-    GstDataQueueItem *item;
-    gboolean success = gst_data_queue_pop(data_queue, &item);
-    std::cout << "here" << std::endl;
+  GstDataQueueItem *item;
+  gboolean success = gst_data_queue_pop(data_queue, &item);
+  std::cout << "here" << std::endl;
 
-    if (!success) {
-        std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
-        return GST_FLOW_EOS;
-    }
-    else {
-      std::cout << "NOT EMPTY" << std::endl;
-    }
-
-    buf = gst_buffer_ref (GST_BUFFER (item->object));
-    item->destroy (item);
-
-
-
-    // GstBuffer *queued_buffer = GST_BUFFER_CAST(item->object);
-    // if (!queued_buffer) {
-    //     std::cerr << "Failed to cast queue item to GstBuffer" << std::endl;
-    //     g_slice_free(GstDataQueueItem, item);
-    //     return GST_FLOW_ERROR;
-    // }
-
-    // GstMapInfo queued_map, fill_map;
-    
-    // gst_buffer_map(queued_buffer, &queued_map, GST_MAP_READ);
-    // gst_buffer_set_size(buf, queued_map.size);
-    // std::cout << "New buf size: " << gst_buffer_get_size(buf) << std::endl; 
-    // gst_buffer_map(buf, &fill_map, GST_MAP_WRITE);
-
-    // std::cout << "queued_map.size: " << queued_map.size << ", fill_map.size: " << fill_map.size << std::endl;
-
-    // if (queued_map.size <= fill_map.size) {
-    //     memcpy(fill_map.data, queued_map.data, queued_map.size);
-    // } else {
-    //     std::cerr << "Buffer size mismatch, cannot copy data" << std::endl;
-    //     gst_buffer_unmap(queued_buffer, &queued_map);
-    //     gst_buffer_unmap(buf, &fill_map);
-    //     gst_buffer_unref(queued_buffer);
-    //     g_slice_free(GstDataQueueItem, item);
-    //     return GST_FLOW_ERROR;
-    // }
-    // gst_buffer_unmap(queued_buffer, &queued_map);
-    // gst_buffer_unmap(buf, &fill_map);
+  if (!success) {
+      std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
+      return GST_FLOW_EOS;
+  }
+  else {
+    std::cout << "NOT EMPTY" << std::endl;
+  }
+  std::cout << "before dest" << std::endl;
+  buf = gst_buffer_ref (GST_BUFFER (item->object));
+  std::cout << "after gst_bufref " << std::endl;
+  // item->destroy (item);
+  // std::cout << "after destroy %GST_PTR_FORMAT" << buf << std::endl;
+  g_print("after destroy " GST_PTR_FORMAT "\n", buf);
 
 
-    // GST_BUFFER_PTS(buf) = GST_BUFFER_PTS(queued_buffer);
-    // GST_BUFFER_DTS(buf) = GST_BUFFER_DTS(queued_buffer);
-
-    // gst_buffer_unref(queued_buffer);
-    // g_slice_free(GstDataQueueItem, item);
-
-    return GST_FLOW_OK;
+  return GST_FLOW_OK;
 }
+
+static void gst_my_src_dispose(GObject *gobject)
+{
+    GstMySrc *mysrc = GST_MYSRC(gobject);
+
+    if (mysrc->srcpad) {
+      g_print("Disposing srcpad...\n");
+      if (GST_IS_PAD(mysrc->srcpad)) {
+          g_print("Removing and unreffing srcpad\n");
+          gst_element_remove_pad(GST_ELEMENT(mysrc), mysrc->srcpad);
+          g_object_unref(mysrc->srcpad);
+      } 
+      else {
+        g_print("srcpad is not a valid GstPad object\n");
+      }
+      mysrc->srcpad = NULL;
+    } 
+    else {
+        g_print("srcpad is already NULL\n");
+    }
+
+
+    // Call the parent class's dispose method
+    G_OBJECT_CLASS(parent_class)->dispose(gobject);
+}
+
 
 /* initialize the myfilter's class */
 static void
@@ -229,7 +224,7 @@ gst_my_src_class_init (GstMySrcClass * klass)
 
   base_src_class->start = GST_DEBUG_FUNCPTR(gst_my_src_start); // called from ready to paused 
   push_src_class->fill = GST_DEBUG_FUNCPTR(gst_my_src_fill);
-  //todo add dispose
+  gobject_class->dispose = GST_DEBUG_FUNCPTR(gst_my_src_dispose);
 
 
 
@@ -255,20 +250,18 @@ gst_my_src_class_init (GstMySrcClass * klass)
 static void
 gst_my_src_init (GstMySrc * mysrc)
 {
-  mysrc->srcpad = gst_pad_new_from_static_template (&src_factory, "src");
-  GST_PAD_SET_PROXY_CAPS (mysrc->srcpad);
-  gst_element_add_pad (GST_ELEMENT (mysrc), mysrc->srcpad);
+  std::cout << "adding src pad" << std::endl;
+  // mysrc->srcpad = gst_pad_new_from_static_template (&src_factory, "src");
+  // GST_PAD_SET_PROXY_CAPS (mysrc->srcpad);
+  // gst_element_add_pad (GST_ELEMENT (mysrc), mysrc->srcpad);
 
   mysrc->silent = FALSE;
 
-  std::cout << "helloooo any body" << std::endl;
   data_queue = gst_data_queue_new(custom_check_full, custom_full_callback, custom_empty_callback, mysrc);
-  std::cout << "here1111" << std::endl;
   if (!data_queue) {
       std::cerr << "Failed to initialize global data queue" << std::endl;
   }
 
-  // data_queue = gst_data_queue_new(NULL);
 }
 
 static void
@@ -303,60 +296,6 @@ gst_my_src_get_property (GObject * object, guint prop_id,
   }
 }
 
-/* GstElement vmethod implementations */
-
-// /* this function handles sink events */
-// static gboolean
-// gst_my_src_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
-// {
-//   GstMySrc *src;
-//   gboolean ret;
-
-//   src = GST_MYSRC (parent);
-
-//   GST_LOG_OBJECT (src, "Received %s event: %" GST_PTR_FORMAT,
-//       GST_EVENT_TYPE_NAME (event), event);
-
-//   switch (GST_EVENT_TYPE (event)) {
-//     case GST_EVENT_CAPS:
-//     {
-//       GstCaps * caps;
-
-//       gst_event_parse_caps (event, &caps);
-//       /* do something with the caps */
-
-//       /* and forward */
-//       ret = gst_pad_event_default (pad, parent, event);
-//       break;
-//     }
-//     default:
-//       ret = gst_pad_event_default (pad, parent, event);
-//       break;
-//   }
-//   return ret;
-// }
-
-/* chain function
- * this function does the actual processing
- */
-// static GstFlowReturn
-// gst_my_src_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
-// {
-//   GstMySrc *src;
-
-//   src = GST_MYSRC (parent);
-
-//   if (src->silent == FALSE){
-//     // g_print ("Loaded!");
-//     // Now we can use iostream C++:
-//     // std::cout << "Test1" << std::endl;
-//   }
-
-//   /* just push out the incoming buffer without touching it */
-//   return gst_pad_push (src->srcpad, buf);
-// }
-
-
 /* entry point to initialize the plug-in
  * initialize the plug-in itself
  * register the element factories and other features
@@ -364,14 +303,10 @@ gst_my_src_get_property (GObject * object, guint prop_id,
 static gboolean
 mysrc_init (GstPlugin * mysrc)
 {
-  
   GST_DEBUG_CATEGORY_INIT (gst_my_src_debug, "mysrc",
       0, "Template mysrc");
-
   return gst_element_register (mysrc, "mysrc", GST_RANK_NONE,
       GST_TYPE_MYSRC);
-
-  
 }
 
 /* PACKAGE: this is usually set by autotools depending on some _INIT macro
@@ -387,10 +322,7 @@ mysrc_init (GstPlugin * mysrc)
 #ifndef PACKAGE_VERSION
 #define PACKAGE_VERSION "1.19.0.1"
 #endif
-/* gstreamer looks for this structure to register myfilters
- *
- * exchange the string 'Template myfilter' with your myfilter description
- */
+
 GST_PLUGIN_DEFINE (
     GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
