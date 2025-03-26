@@ -28,7 +28,7 @@ GST_STATIC_PAD_TEMPLATE ("src",
     GST_STATIC_CAPS (
         "video/x-raw, "
         "format=(string)RGB, "
-        "width=(int)1200, "
+        "width=(int)1280, "
         "height=(int)800, "
         "framerate=(fraction)30/1"
     )
@@ -49,6 +49,7 @@ rclcpp::Subscription<std_msgs::msg::String>::SharedPtr string_sub;
 rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub;
 GstDataQueue *data_queue;
 std::mutex data_queue_mutex;
+bool flag = true;
 
 int cnt = 0;
 
@@ -84,6 +85,21 @@ void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     size_t image_size = msg->data.size();
     std::cout << "image_size: " << image_size << std::endl;
 
+    //print random numbers from frame
+    // size_t sample_pixels = std::min((size_t)10, image_size); // Check first 10 pixels
+    // for (size_t i = 0; i < sample_pixels; ++i) {
+    //     std::cout << "Pixel " << i << ": " << (int)image_data[i] << std::endl;
+    // }
+
+    //save image to file using openCV
+    // if(flag){
+    //   cv::Mat frame(msg->height, msg->width, CV_8UC3, const_cast<uint8_t*>(msg->data.data()));
+    //   cv::imwrite("/home/ubuntu/frames/test_frame.jpg", frame);
+    //   flag = false;
+    // }
+    // std::cout << "image data 14: " << image_data[14] << std::endl;
+
+
     GstBuffer *buffer = gst_buffer_new_allocate(NULL, image_size, NULL);
     if (!buffer) {
         std::cerr << "Failed to allocate GstBuffer" << std::endl;
@@ -107,6 +123,24 @@ void ros_message_callback(const sensor_msgs::msg::Image::SharedPtr msg) {
     item->size = gst_buffer_get_size(buffer);
     item->visible = TRUE;
     item->duration = GST_CLOCK_TIME_NONE;
+
+
+
+    // only for reading
+    GstMapInfo map_info1;
+    if (gst_buffer_map(buffer, &map_info1, GST_MAP_READ)) {
+        std::cout << "ROS CB FUNC:: map data 14: " << (int)map_info1.data[14] << std::endl;
+        gst_buffer_unmap(buffer, &map_info1);
+    } else {
+        std::cerr << "Failed to map GstBuffer for writing" << std::endl;
+        gst_buffer_unref(buffer);
+        return;
+    }
+
+
+
+
+
 
     // Push the item onto the queue
       // std::lock_guard<std::mutex> lock(data_queue_mutex);
@@ -156,27 +190,89 @@ gst_my_src_start (GstBaseSrc * src)
   return TRUE;
 }
 
+//old imp
+// static GstFlowReturn gst_my_src_fill(GstPushSrc *src, GstBuffer *buf) {
+//   GstDataQueueItem *item;
+//   gboolean success = gst_data_queue_pop(data_queue, &item);
+//   std::cout << "here" << std::endl;
+
+//   if (!success) {
+//       std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
+//       return GST_FLOW_EOS;
+//   }
+//   else {
+//     std::cout << "NOT EMPTY" << std::endl;
+//   }
+//   std::cout << "before dest" << std::endl;
+//   buf = gst_buffer_ref (GST_BUFFER (item->object));
+//   std::cout << "Buffer size: " << gst_buffer_get_size(buf) << " bytes" << std::endl;
+//   std::cout << "fill func buffer data 14: " << (int)buf->data[14] << std::endl;
+
+//   std::cout << "after gst_bufref " << std::endl;
+//   // item->destroy (item);
+//   // std::cout << "after destroy %GST_PTR_FORMAT" << buf << std::endl;
+//   g_print("after destroy " GST_PTR_FORMAT "\n", buf);
+
+
+//   return GST_FLOW_OK;
+// }
+
 static GstFlowReturn gst_my_src_fill(GstPushSrc *src, GstBuffer *buf) {
-  GstDataQueueItem *item;
-  gboolean success = gst_data_queue_pop(data_queue, &item);
-  std::cout << "here" << std::endl;
+    GstDataQueueItem *item;
+    gboolean success = gst_data_queue_pop(data_queue, &item);
 
-  if (!success) {
-      std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
-      return GST_FLOW_EOS;
-  }
-  else {
-    std::cout << "NOT EMPTY" << std::endl;
-  }
-  std::cout << "before dest" << std::endl;
-  buf = gst_buffer_ref (GST_BUFFER (item->object));
-  std::cout << "after gst_bufref " << std::endl;
-  // item->destroy (item);
-  // std::cout << "after destroy %GST_PTR_FORMAT" << buf << std::endl;
-  g_print("after destroy " GST_PTR_FORMAT "\n", buf);
+    if (!success) {
+        std::cerr << "Queue is empty, returning GST_FLOW_EOS" << std::endl;
+        return GST_FLOW_EOS;
+    }
+
+    buf = gst_buffer_ref(GST_BUFFER(item->object));
+    GstMapInfo map1;
+
+    int width = 1280; // Set the actual width of the frame
+    int height = 800; // Set the actual height of the frame
+    int channels = 3; // Number
 
 
-  return GST_FLOW_OK;
+    // Map the buffer to access its memory
+    if (gst_buffer_map(buf, &map1, GST_MAP_READ)) {
+        std::cout << "Buffer size: " << map1.size << " bytes" << std::endl;
+        int expected_size = width * height * channels;
+        if (map1.size != expected_size) {
+            std::cerr << "Buffer size mismatch! Expected: " << expected_size
+                      << ", Actual: " << map1.size << std::endl;
+            gst_buffer_unmap(buf, &map1);
+            return GST_FLOW_ERROR;
+        }
+
+        // // Assuming the data in the buffer is raw RGB or grayscale image data.
+        
+        // // Create an OpenCV matrix
+        //how i print out the msg 
+        // cv::Mat frame(msg->height, msg->width, CV_8UC3, const_cast<uint8_t*>(msg->data.data()));
+
+        if(flag){
+          cv::Mat frame(height, width, CV_8UC3);
+          std::memcpy(frame.data, map1.data, map1.size);
+          std::cout << "map.data put into openCV frame" << std::endl;
+          cv::imwrite("/home/ubuntu/frames/output_frame.jpg", frame); 
+          flag = false;
+        }
+
+        // Print the value at the 14th byte (if the buffer is large enough)
+        if (map1.size > 14) {
+            std::cout << "FILL FUNC:: Value at position 14: " << static_cast<int>(map1.data[14]) << std::endl;
+        } else {
+            std::cerr << "Buffer is smaller than 14 bytes!" << std::endl;
+        }
+
+        // Unmap the buffer after you're done
+        gst_buffer_unmap(buf, &map1);
+    } else {
+        std::cerr << "Failed to map buffer memory!" << std::endl;
+    }
+
+    return GST_FLOW_OK;
 }
 
 static void gst_my_src_dispose(GObject *gobject)

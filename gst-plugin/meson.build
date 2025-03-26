@@ -18,6 +18,7 @@ ros2c_dep = dependency('rclc', required: true)
 ros2cpp_dep = dependency('rclcpp', required: true)
 std_msgs_dep = dependency('std_msgs', required: true)
 sensor_msgs_dep = dependency('sensor_msgs', required: true)
+opencv_dep = dependency('opencv4', required: true)
 
 # Plugin 1
 plugin_sources = [
@@ -72,7 +73,7 @@ gstmyfilterexample = library('gstmysrc',
   gstmysrc_sources,
   c_args: plugin_c_args,
   include_directories: [include_directories('.'), gst_include, gstbase_include],
-  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2cpp_dep, std_msgs_dep, sensor_msgs_dep],
+  dependencies : [gst_dep, gstbase_dep, ros2_dep, ros2cpp_dep, std_msgs_dep, sensor_msgs_dep, opencv_dep],
   install : true,
   install_dir : plugins_install_dir,
 )
